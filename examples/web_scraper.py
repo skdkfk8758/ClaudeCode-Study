@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import logging
 import time
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
 # 로깅 설정
@@ -115,6 +116,45 @@ class WebScraper:
             if "does not appear to be" not in str(e):
                 raise
 
+        # 5. DNS Rebinding 방어 - 도메인 이름의 DNS 해석 결과 검증
+        try:
+            # 도메인 이름을 IP로 해석
+            resolved_ips = socket.getaddrinfo(hostname, None)
+            for result in resolved_ips:
+                ip_str = result[4][0]
+                try:
+                    resolved_ip = ipaddress.ip_address(ip_str)
+
+                    # 해석된 IP가 내부 주소인지 검증 (우선순위 순서대로)
+                    # AWS 메타데이터 엔드포인트 먼저 체크 (가장 구체적)
+                    if str(resolved_ip) == "169.254.169.254":
+                        raise ValueError(f"DNS Rebinding 감지: {hostname} → 클라우드 메타데이터 엔드포인트")
+
+                    # 루프백 주소
+                    if resolved_ip.is_loopback:
+                        raise ValueError(f"DNS Rebinding 감지: {hostname} → {ip_str} (루프백)")
+
+                    # 링크 로컬 (is_private보다 먼저 체크)
+                    if resolved_ip.is_link_local:
+                        raise ValueError(f"DNS Rebinding 감지: {hostname} → {ip_str} (링크 로컬)")
+
+                    # 내부 네트워크
+                    if resolved_ip.is_private:
+                        raise ValueError(f"DNS Rebinding 감지: {hostname} → {ip_str} (내부 IP)")
+
+                    # 예약된 주소
+                    if resolved_ip.is_reserved:
+                        raise ValueError(f"DNS Rebinding 감지: {hostname} → {ip_str} (예약됨)")
+
+                except ValueError as ve:
+                    # IP 파싱 실패는 무시하고 다음 결과로
+                    if "does not appear to be" not in str(ve):
+                        raise
+
+        except socket.gaierror:
+            # DNS 해석 실패는 허용 (오프라인 테스트 등)
+            logger.debug(f"DNS 해석 실패: {hostname} (계속 진행)")
+
         return True
 
     def __enter__(self):
@@ -174,7 +214,7 @@ class WebScraper:
         Returns:
             Article 객체 리스트
         """
-        soup = BeautifulSoup(html, 'html.parser')
+        soup = BeautifulSoup(html, 'lxml')
         articles = []
 
         # 예시: 기사 항목 찾기 (실제 사이트 구조에 맞게 수정 필요)
@@ -250,7 +290,7 @@ def extract_links(html: str, base_url: str = "") -> List[str]:
     Returns:
         링크 리스트
     """
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html, 'lxml')
     links = []
 
     for link in soup.find_all('a', href=True):
@@ -274,7 +314,7 @@ def extract_images(html: str, base_url: str = "") -> List[Dict[str, str]]:
     Returns:
         이미지 정보 딕셔너리 리스트 (src, alt)
     """
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html, 'lxml')
     images = []
 
     for img in soup.find_all('img', src=True):
@@ -322,6 +362,12 @@ def main() -> int:
                         <a href="/article/2">자세히 보기</a>
                         <p class="summary">이것은 두 번째 기사의 요약입니다.</p>
                         <time datetime="2024-01-02">2024년 1월 2일</time>
+                    </article>
+                    <article class="post">
+                        <h2 class="title">세 번째 기사</h2>
+                        <a href="/article/3">자세히 보기</a>
+                        <p class="summary">이것은 세 번째 기사의 요약입니다.</p>
+                        <time datetime="2024-01-03">2024년 1월 3일</time>
                     </article>
                 </body>
             </html>

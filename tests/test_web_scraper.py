@@ -9,6 +9,7 @@
 
 import pytest
 import requests
+import socket
 from unittest.mock import Mock, patch, MagicMock
 from bs4 import BeautifulSoup
 
@@ -404,6 +405,193 @@ class TestSSLVerification:
             # TODO: verify 파라미터 옵션 추가 고려
 
 
+class TestWebScraperInitialization:
+    """WebScraper 초기화 전용 테스트 클래스"""
+
+    def test_initialization_succeeds_without_errors(self):
+        """
+        테스트: 초기화가 에러 없이 성공하는지 확인
+
+        시나리오: WebScraper 객체 생성 시 ZeroDivisionError나 다른 예외가 발생하지 않음
+        예상 결과: 객체가 정상적으로 생성됨 (이전 버그: line 51의 1/0)
+        """
+        # Arrange & Act (준비 및 실행)
+        base_url = "https://example.com"
+        timeout = 10
+
+        # 초기화 중 예외가 발생하지 않아야 함
+        scraper = WebScraper(base_url, timeout)
+
+        # Assert (검증)
+        assert scraper is not None
+
+    def test_initialization_with_custom_timeout(self):
+        """
+        테스트: 커스텀 타임아웃으로 초기화
+
+        시나리오: 사용자 정의 타임아웃 값으로 WebScraper 생성
+        예상 결과: timeout이 올바르게 설정됨
+        """
+        # Arrange (준비)
+        base_url = "https://example.com"
+        custom_timeout = 15
+
+        # Act (실행)
+        scraper = WebScraper(base_url, custom_timeout)
+
+        # Assert (검증)
+        assert scraper.timeout == custom_timeout
+
+    def test_initialization_with_default_timeout(self):
+        """
+        테스트: 기본 타임아웃으로 초기화
+
+        시나리오: timeout 파라미터 없이 WebScraper 생성
+        예상 결과: 기본값 10초로 설정됨
+        """
+        # Arrange (준비)
+        base_url = "https://example.com"
+
+        # Act (실행)
+        scraper = WebScraper(base_url)
+
+        # Assert (검증)
+        assert scraper.timeout == 10
+
+    def test_all_instance_variables_properly_set(self):
+        """
+        테스트: 모든 인스턴스 변수가 올바르게 설정되는지 확인
+
+        시나리오: 초기화 후 base_url, timeout, session 모두 확인
+        예상 결과: 모든 속성이 올바른 값과 타입으로 설정됨
+        """
+        # Arrange & Act (준비 및 실행)
+        base_url = "https://example.com"
+        timeout = 15
+        scraper = WebScraper(base_url, timeout)
+
+        # Assert (검증)
+        assert scraper.base_url == base_url
+        assert scraper.timeout == timeout
+        assert scraper.session is not None
+        assert isinstance(scraper.session, requests.Session)
+
+    def test_session_has_user_agent_header(self):
+        """
+        테스트: 세션에 User-Agent 헤더가 설정되는지 확인
+
+        시나리오: 초기화 후 session.headers에 User-Agent 포함
+        예상 결과: User-Agent 헤더가 존재하고 적절한 값을 가짐
+        """
+        # Arrange & Act (준비 및 실행)
+        scraper = WebScraper("https://example.com")
+
+        # Assert (검증)
+        assert 'User-Agent' in scraper.session.headers
+        assert 'Mozilla' in scraper.session.headers['User-Agent']
+
+    def test_session_max_redirects_is_set(self):
+        """
+        테스트: 세션의 max_redirects가 설정되는지 확인
+
+        시나리오: 초기화 후 session.max_redirects 값 확인
+        예상 결과: MAX_REDIRECTS 상수 값(5)으로 설정됨
+        """
+        # Arrange & Act (준비 및 실행)
+        scraper = WebScraper("https://example.com")
+
+        # Assert (검증)
+        assert scraper.session.max_redirects == WebScraper.MAX_REDIRECTS
+        assert scraper.session.max_redirects == 5
+
+    def test_context_manager_enter(self):
+        """
+        테스트: Context manager의 __enter__ 메서드
+
+        시나리오: with 문으로 WebScraper 사용 시작
+        예상 결과: __enter__가 self를 반환하고 정상 작동
+        """
+        # Arrange (준비)
+        base_url = "https://example.com"
+
+        # Act (실행)
+        with WebScraper(base_url) as scraper:
+            # Assert (검증)
+            assert scraper is not None
+            assert scraper.base_url == base_url
+            assert scraper.session is not None
+
+    def test_context_manager_exit_closes_session(self):
+        """
+        테스트: Context manager의 __exit__ 메서드가 세션을 닫는지 확인
+
+        시나리오: with 블록 종료 시 session.close() 호출
+        예상 결과: 세션이 정상적으로 종료됨
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Act (실행)
+        with patch.object(scraper.session, 'close') as mock_close:
+            scraper.__exit__(None, None, None)
+
+            # Assert (검증)
+            mock_close.assert_called_once()
+
+    def test_context_manager_full_lifecycle(self):
+        """
+        테스트: Context manager의 전체 생명주기
+
+        시나리오: with 문으로 전체 사용 과정 테스트
+        예상 결과: 진입, 사용, 종료가 모두 정상 작동
+        """
+        # Arrange (준비)
+        base_url = "https://example.com"
+
+        # Act & Assert (실행 및 검증)
+        with WebScraper(base_url) as scraper:
+            # 진입 후: 정상적으로 사용 가능
+            assert scraper.base_url == base_url
+            assert scraper.session is not None
+
+            # 세션 close 감시
+            with patch.object(scraper.session, 'close') as mock_close:
+                pass
+        # with 블록 종료 후: close가 호출되었는지는 블록 내부에서 확인 불가
+        # 하지만 예외 없이 정상 종료되어야 함
+
+    def test_multiple_instances_independent(self):
+        """
+        테스트: 여러 WebScraper 인스턴스가 독립적인지 확인
+
+        시나리오: 두 개의 WebScraper 인스턴스를 생성
+        예상 결과: 각 인스턴스가 독립적인 session과 속성을 가짐
+        """
+        # Arrange & Act (준비 및 실행)
+        scraper1 = WebScraper("https://example1.com", timeout=10)
+        scraper2 = WebScraper("https://example2.com", timeout=20)
+
+        # Assert (검증)
+        assert scraper1.base_url != scraper2.base_url
+        assert scraper1.timeout != scraper2.timeout
+        assert scraper1.session is not scraper2.session
+
+    def test_initialization_does_not_make_network_requests(self):
+        """
+        테스트: 초기화 시 네트워크 요청이 발생하지 않는지 확인
+
+        시나리오: WebScraper 생성만으로는 HTTP 요청이 발생하지 않음
+        예상 결과: 초기화 중 requests.get()이 호출되지 않음
+        """
+        # Arrange & Act (준비 및 실행)
+        with patch('requests.Session.get') as mock_get:
+            scraper = WebScraper("https://example.com")
+
+            # Assert (검증)
+            mock_get.assert_not_called()
+            assert scraper is not None
+
+
 class TestNormalFunctionality:
     """정상 기능 테스트 클래스"""
 
@@ -765,7 +953,8 @@ class TestEdgeCases:
         assert articles[0].title == "Article 0"
         assert articles[99].title == "Article 99"
 
-    def test_network_connection_error(self):
+    @patch('socket.getaddrinfo')
+    def test_network_connection_error(self, mock_getaddrinfo):
         """
         테스트: 네트워크 연결 오류
 
@@ -775,9 +964,153 @@ class TestEdgeCases:
         # Arrange (준비)
         scraper = WebScraper("https://example.com")
 
+        # Mock DNS resolution to return an external IP (to bypass DNS Rebinding protection)
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('93.184.216.34', 0))  # example.com의 실제 IP
+        ]
+
         # Act & Assert (실행 및 검증)
         with patch.object(scraper.session, 'get') as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError()
 
             with pytest.raises(requests.exceptions.ConnectionError):
                 scraper.fetch_page("https://unreachable.com")
+
+
+class TestDNSRebindingProtection:
+    """DNS Rebinding 보호 테스트"""
+
+    @patch('socket.getaddrinfo')
+    def test_dns_rebinding_to_private_ip(self, mock_getaddrinfo):
+        """
+        테스트: DNS Rebinding - 도메인이 내부 IP로 해석되는 경우
+
+        시나리오: 외부 도메인 이름이 DNS에서 내부 IP로 해석됨
+        예상 결과: ValueError 발생 (DNS Rebinding 감지)
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to return a private IP
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('192.168.1.100', 0))
+        ]
+
+        # Act & Assert (실행 및 검증)
+        with pytest.raises(ValueError, match="DNS Rebinding 감지.*내부 IP"):
+            scraper.fetch_page("https://malicious-domain.com")
+
+    @patch('socket.getaddrinfo')
+    def test_dns_rebinding_to_loopback(self, mock_getaddrinfo):
+        """
+        테스트: DNS Rebinding - 도메인이 루프백 주소로 해석되는 경우
+
+        시나리오: 외부 도메인 이름이 127.0.0.1로 해석됨
+        예상 결과: ValueError 발생 (DNS Rebinding 감지)
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to return loopback address
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('127.0.0.1', 0))
+        ]
+
+        # Act & Assert (실행 및 검증)
+        with pytest.raises(ValueError, match="DNS Rebinding 감지.*루프백"):
+            scraper.fetch_page("https://evil.example.com")
+
+    @patch('socket.getaddrinfo')
+    def test_dns_rebinding_to_link_local(self, mock_getaddrinfo):
+        """
+        테스트: DNS Rebinding - 도메인이 링크 로컬 주소로 해석되는 경우
+
+        시나리오: 외부 도메인 이름이 169.254.x.x로 해석됨
+        예상 결과: ValueError 발생 (DNS Rebinding 감지)
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to return link-local address
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('169.254.1.1', 0))
+        ]
+
+        # Act & Assert (실행 및 검증)
+        with pytest.raises(ValueError, match="DNS Rebinding 감지.*링크 로컬"):
+            scraper.fetch_page("https://linklocal-attack.com")
+
+    @patch('socket.getaddrinfo')
+    def test_dns_rebinding_to_aws_metadata(self, mock_getaddrinfo):
+        """
+        테스트: DNS Rebinding - 도메인이 AWS 메타데이터 엔드포인트로 해석되는 경우
+
+        시나리오: 외부 도메인 이름이 169.254.169.254로 해석됨
+        예상 결과: ValueError 발생 (클라우드 메타데이터 엔드포인트 접근 금지)
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to return AWS metadata endpoint
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('169.254.169.254', 0))
+        ]
+
+        # Act & Assert (실행 및 검증)
+        with pytest.raises(ValueError, match="DNS Rebinding 감지.*메타데이터"):
+            scraper.fetch_page("https://aws-metadata-attack.com")
+
+    @patch('socket.getaddrinfo')
+    def test_dns_rebinding_allows_valid_external_ip(self, mock_getaddrinfo):
+        """
+        테스트: DNS Rebinding 보호가 정상적인 외부 IP는 허용하는지 검증
+
+        시나리오: 외부 도메인 이름이 정상적인 외부 IP로 해석됨
+        예상 결과: 정상적으로 페이지 가져오기 진행
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to return a valid external IP
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('93.184.216.34', 0))  # example.com의 실제 IP
+        ]
+
+        # Act & Assert (실행 및 검증)
+        with patch.object(scraper.session, 'get') as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.text = "<html>Valid Content</html>"
+            mock_response.url = "https://example.com"
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            result = scraper.fetch_page("https://example.com")
+            assert result == "<html>Valid Content</html>"
+
+    @patch('socket.getaddrinfo')
+    def test_dns_resolution_failure_allows_request(self, mock_getaddrinfo):
+        """
+        테스트: DNS 해석 실패 시에도 요청이 진행되는지 검증
+
+        시나리오: DNS 해석이 실패하는 경우 (오프라인 환경 등)
+        예상 결과: DNS 검증을 건너뛰고 요청 진행 (실제 네트워크 오류는 나중에 발생)
+        """
+        # Arrange (준비)
+        scraper = WebScraper("https://example.com")
+
+        # Mock DNS resolution to fail
+        mock_getaddrinfo.side_effect = socket.gaierror("Name or service not known")
+
+        # Act & Assert (실행 및 검증)
+        with patch.object(scraper.session, 'get') as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.text = "<html>Content</html>"
+            mock_response.url = "https://example.com"
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            # DNS 실패는 무시되고 요청이 진행됨
+            result = scraper.fetch_page("https://example.com")
+            assert result == "<html>Content</html>"
