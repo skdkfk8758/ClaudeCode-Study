@@ -9,6 +9,14 @@ venv/
 ENV/
 env/
 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+dist/
+
 # Testing
 .pytest_cache/
 .coverage
@@ -30,3 +38,5 @@ Thumbs.db
 *.log
 temp_data.csv
 processed_data.csv
+temp_data.json
+processed_data.json

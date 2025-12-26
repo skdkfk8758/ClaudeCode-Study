@@ -1,0 +1,31 @@
+{
+  "name": "claude-code-subagent-skills",
+  "version": "1.0.0",
+  "description": "Claude Code 서브에이전트 및 스킬 학습 프로젝트 - TypeScript/JavaScript 예제",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "scraper": "tsx examples/typescript/web-scraper.ts",
+    "api": "tsx examples/typescript/api-client.ts",
+    "processor": "tsx examples/typescript/data-processor.ts"
+  },
+  "keywords": [
+    "claude-code",
+    "subagents",
+    "skills",
+    "examples",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "tsx": "^4.7.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "zod": "^3.22.0"
+  }
+}
